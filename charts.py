@@ -14,6 +14,8 @@ COLOR_MUTED = "#64748B"
 COLOR_GRID = "#E2E8F0"
 
 FONT_FAMILY = "Sarabun, Noto Sans Thai, Segoe UI, Arial, sans-serif"
+LEGEND_TOP_MARGIN = 115   # px: ที่ว่างด้านบนสำหรับชื่อกราฟ + Legend สูงสุด 2 บรรทัด
+TITLE_ONLY_MARGIN = 55    # px: ที่ว่างด้านบนเมื่อมีเฉพาะชื่อกราฟ
 HISTOGRAM_BIN_SIZE = 0.25  # ความกว้างช่วง GPA ของฮิสโตแกรม
 PROGRESSION_STYLE = {  # สี + สัญลักษณ์ + ลายเส้น ต่างกันในแต่ละทักษะ ไม่พึ่งสีอย่างเดียว
     "การทำงานกลุ่ม (Groupwork)": (COLOR_BLUE, "circle", "solid"),
@@ -23,12 +25,17 @@ PROGRESSION_STYLE = {  # สี + สัญลักษณ์ + ลายเส�
 
 
 def _style(fig: go.Figure, title: str, height: int = 380, legend_top: bool = True) -> go.Figure:
-    """ตั้งค่า Template, Font, Margin, Gridline, Legend ให้เหมือนกันทุกกราฟ"""
+    """ตั้งค่า Template, Font, Margin, Gridline, Legend ให้เหมือนกันทุกกราฟ
+
+    ชื่อกราฟอยู่บนสุด ส่วน Legend วางเหนือพื้นที่กราฟและเว้นที่ให้ขึ้นได้ 2 บรรทัด
+    เพื่อไม่ให้ทับชื่อกราฟเมื่อหน้าจอแคบ
+    """
     fig.update_layout(
         template="plotly_white",
-        title=dict(text=title, x=0, xanchor="left", font=dict(size=16, color=COLOR_TEXT)),
+        title=dict(text=title, x=0, xanchor="left", y=0.98, yanchor="top",
+                   font=dict(size=16, color=COLOR_TEXT)),
         height=height,
-        margin=dict(l=10, r=20, t=70 if legend_top else 50, b=40),
+        margin=dict(l=10, r=20, t=LEGEND_TOP_MARGIN if legend_top else TITLE_ONLY_MARGIN, b=40),
         font=dict(family=FONT_FAMILY, size=13, color=COLOR_TEXT),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -96,7 +103,7 @@ def progression_chart(long: pd.DataFrame, selected_skills: list[str]) -> go.Figu
         ))
     fig.update_xaxes(title_text="ระยะของโปรเจกต์ (Phase)", categoryorder="array", categoryarray=phases)
     fig.update_yaxes(title_text="คะแนนทักษะ (สเกล 1-5)", range=[1, 5.2], dtick=1)
-    return _style(fig, "พัฒนาการทักษะแต่ละ Phase", height=420)
+    return _style(fig, "พัฒนาการทักษะแต่ละ Phase (ข้อมูลจำลอง)", height=420)
 
 
 def gpa_box_chart(df: pd.DataFrame) -> go.Figure:

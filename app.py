@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -14,7 +15,8 @@ import data_loader as dl
 
 PERSONA_LABELS = {
     "student": "นิสิต (Student)",
-    
+    "instructor": "อาจารย์ผู้สอน (Instructor)",
+    "employer": "ผู้ประกอบการ (Employer)",
 }
 ACTIVITY_FILTER_LABELS = {
     "all": "ทั้งหมด",
@@ -24,6 +26,25 @@ ACTIVITY_FILTER_LABELS = {
 DENOMINATOR_LABELS = {
     "all": "ทุกประกาศ",
     "with_skills": "เฉพาะประกาศที่ระบุทักษะในคอลัมน์ skills",
+}
+PERSONA_KPIS = {  # ชุด KPI ของแต่ละมุมมอง (key อ้างอิงใน build_kpi_cards)
+    "student": ["records", "gpa", "gap", "top_skill"],
+    "instructor": ["records", "gpa", "active", "gpa_diff"],
+    "employer": ["postings", "skills_listed", "top_skill", "team"],
+}
+PERSONA_TAB_ORDER = {  # แท็บแรกคือแท็บที่เปิดอยู่เมื่อเข้าหน้านี้
+    "student": ["gap", "gpa", "demand", "progression", "quality"],
+    "instructor": ["progression", "gpa", "gap", "demand", "quality"],
+    "employer": ["demand", "gap", "progression", "gpa", "quality"],
+}
+PERSONA_FINDING_ORDER = {
+    "student": ["gap", "hard", "soft", "activity", "absence"],
+    "instructor": ["activity", "absence", "gap", "hard", "soft"],
+    "employer": ["hard", "soft", "gap", "activity", "absence"],
+}
+TAB_LABELS = {
+    "gap": "Perception Gap", "demand": "Industry Skill Demand", "progression": "Skill Progression",
+    "gpa": "GPA & Extracurricular", "quality": "คุณภาพข้อมูล",
 }
 TOP_N_SKILLS = 10  # จำนวนทักษะสูงสุดที่แสดงในกราฟจัดอันดับ
 DEFAULT_ACTIVITY = "all"
@@ -78,7 +99,7 @@ def render_sidebar(students: dl.StudentData, jobs: dl.JobBundle) -> tuple[str, t
         persona = st.selectbox(
             "มุมมองผู้ใช้ (User Persona)", options=list(PERSONA_LABELS),
             format_func=PERSONA_LABELS.get, key="persona",
-            help="เปลี่ยนเฉพาะข้อเสนอแนะท้ายหน้า ไม่มีผลกับตัวเลขหรือกราฟ",
+            help="เปลี่ยนชุด KPI ลำดับแท็บ ลำดับข้อค้นพบ และข้อเสนอแนะ ส่วนตัวเลขของแต่ละกราฟคำนวณจากข้อมูลเดิม",
         )
 
         st.subheader("ตัวกรองข้อมูลนิสิต")
@@ -112,7 +133,7 @@ def render_sidebar(students: dl.StudentData, jobs: dl.JobBundle) -> tuple[str, t
 # Header + KPI
 # ---------------------------------------------------------------------------
 def render_header(students: dl.StudentData, jobs: dl.JobBundle) -> None:
-    st.title("Student Potential")
+    st.title("Unlocking Student Potential")
     st.markdown(
         "**แดชบอร์ดวิเคราะห์พัฒนาการทักษะของนิสิตเทียบกับความต้องการของตลาดแรงงาน** "
         "ครอบคลุมผลการเรียน (GPA) กิจกรรมเสริมหลักสูตร ช่องว่างการรับรู้ทักษะ (Perception Gap) "
@@ -121,50 +142,105 @@ def render_header(students: dl.StudentData, jobs: dl.JobBundle) -> None:
     st.caption(
         f"ชุดข้อมูล: นิสิต {len(students.df):,} ระเบียน · ประกาศงาน {jobs.n_postings:,} รายการ "
         f"({jobs.date_min} ถึง {jobs.date_max}) · "
-        "คะแนน Perception Gap และ Skill Progression "
+        "คะแนน Perception Gap และ Skill Progression เป็นข้อมูล Benchmark/จำลอง"
     )
 
 
-def render_kpis(filtered: pd.DataFrame, total_rows: int, benchmark: pd.DataFrame) -> None:
-    """KPI 4 ใบ: สามใบแรกคำนวณจากข้อมูลนิสิตที่กรองแล้ว ใบที่สี่เป็น Benchmark"""
+@dataclass(frozen=True)
+class KpiCard:
+    """ข้อมูลของ KPI หนึ่งใบ (ค่าและคำอธิบายถูกคำนวณไว้แล้ว)"""
+
+    label: str
+    value: str
+    caption: str
+    help: str
+
+
+def _top_skill_card(jobs: dl.JobBundle) -> KpiCard:
+    help_text = "ทักษะเทคนิคที่ปรากฏในคอลัมน์ skills ของประกาศงานมากที่สุด ไม่ได้รับผลจากตัวกรองนิสิต"
+    if jobs.skill_counts.empty or jobs.n_postings == 0:
+        return KpiCard("ทักษะเทคนิคที่ถูกระบุมากสุด", "—", "ไม่มีข้อมูลทักษะ", help_text)
+    top = jobs.skill_counts.iloc[0]
+    return KpiCard("ทักษะเทคนิคที่ถูกระบุมากสุด", dl.display_skill_name(top["skill"]),
+                   f"{top['postings'] / jobs.n_postings * 100:.1f}% ของ {jobs.n_postings:,} ประกาศ", help_text)
+
+
+def _team_keyword_card(jobs: dl.JobBundle) -> KpiCard:
+    help_text = ("ร้อยละของประกาศที่คำอธิบายงานมีคำว่า team / teamwork / collaborat* (ค้นด้วย keyword "
+                 "ในคำอธิบายที่ถูกตัดความยาว จึงเป็นค่าประมาณขั้นต่ำ) ไม่ได้รับผลจากตัวกรองนิสิต")
+    row = jobs.soft_counts[jobs.soft_counts["skill"].str.contains("Team")]
+    if row.empty or jobs.n_postings == 0:
+        return KpiCard("ประกาศที่กล่าวถึงการทำงานเป็นทีม", "—", "ไม่มีข้อมูล", help_text)
+    return KpiCard("ประกาศที่กล่าวถึงการทำงานเป็นทีม",
+                   f"{row.iloc[0]['postings'] / jobs.n_postings * 100:.1f}%",
+                   "จาก keyword ในคำอธิบายงาน", help_text)
+
+
+def build_kpi_cards(
+    persona: str, filtered: pd.DataFrame, total_rows: int, benchmark: pd.DataFrame, jobs: dl.JobBundle
+) -> list[KpiCard]:
+    """สร้างชุด KPI ตามมุมมองผู้ใช้ (ทุกใบคำนวณจากข้อมูลจริง หรือระบุว่าเป็น Benchmark)"""
     kpi = dl.student_kpis(filtered)
     widest = benchmark.iloc[0]  # เรียงตาม gap น้อยสุด (ติดลบมากสุด) ไว้แล้ว
-    cols = st.columns(4)
+    diff = dl.mean_difference(filtered) if kpi["n"] else None
+    cards = {
+        "records": KpiCard(
+            "นิสิตที่ผ่านตัวกรอง", f"{kpi['n']:,}", f"จากทั้งหมด {total_rows:,} คน",
+            "จำนวนแถวในข้อมูลนิสิตที่อยู่ในช่วง GPA และกลุ่มกิจกรรมที่เลือก"),
+        "gpa": KpiCard(
+            "GPA เฉลี่ย", "—" if kpi["mean_gpa"] is None else f"{kpi['mean_gpa']:.2f}", "สเกล 0.00–4.00",
+            "ค่าเฉลี่ยของ GPA ของนิสิตที่ผ่านตัวกรอง (สเกล 0-4)"),
+        "active": KpiCard(
+            "ผู้เข้าร่วมกิจกรรมเสริมหลักสูตร",
+            "—" if kpi["pct_active"] is None else f"{kpi['pct_active']:.1f}%",
+            f"{kpi['n_active']:,} จาก {kpi['n']:,} คน",
+            "จำนวนนิสิตที่ Extracurricular = 1 หารด้วยนิสิตที่ผ่านตัวกรอง"),
+        "gap": KpiCard(
+            "Perception Gap สูงสุด", f"{widest['gap']:+.1f}", f"{widest['skill']} (Benchmark)",
+            f"Gap = คะแนนนิสิต − คะแนนตลาดแรงงาน ค่าติดลบ = นิสิตประเมินต่ำกว่าที่ตลาดต้องการ "
+            f"({widest['skill']}: นิสิต {widest['student_score']:.1f} vs ตลาด {widest['industry_score']:.1f}) "
+            "ข้อมูล Benchmark ไม่ถูกกรอง"),
+        "gpa_diff": KpiCard(
+            "ความต่าง GPA (เข้าร่วม − ไม่เข้าร่วม)",
+            "—" if diff is None else f"{diff.diff:+.2f}",
+            f"ต้องมีกลุ่มละ ≥ {dl.MIN_GROUP_SIZE} คน" if diff is None
+            else f"95% CI {diff.ci_low:+.2f} ถึง {diff.ci_high:+.2f}",
+            "ความต่างของ GPA เฉลี่ยระหว่างกลุ่มเข้าร่วมกับไม่เข้าร่วมกิจกรรม เป็นความสัมพันธ์ ไม่ใช่สาเหตุ"),
+        "postings": KpiCard(
+            "ประกาศงานที่วิเคราะห์", f"{jobs.n_postings:,}", f"{jobs.date_min} ถึง {jobs.date_max}",
+            "จำนวนแถวในไฟล์ประกาศงาน (รวมประกาศที่ซ้ำกัน) ไม่ได้รับผลจากตัวกรองนิสิต"),
+        "skills_listed": KpiCard(
+            "ประกาศที่ระบุทักษะ",
+            "—" if jobs.n_postings == 0 else f"{jobs.n_with_skills / jobs.n_postings * 100:.1f}%",
+            f"{jobs.n_with_skills:,} จาก {jobs.n_postings:,} ประกาศ",
+            "ร้อยละของประกาศที่คอลัมน์ skills ไม่ว่าง ประกาศที่เหลือไม่มีข้อมูลทักษะเทคนิค"),
+        "top_skill": _top_skill_card(jobs),
+        "team": _team_keyword_card(jobs),
+    }
+    return [cards[key] for key in PERSONA_KPIS[persona]]
 
-    with cols[0].container(border=True):
-        st.metric("นิสิตที่ผ่านตัวกรอง", f"{kpi['n']:,}",
-                  help="จำนวนแถวในข้อมูลนิสิตที่อยู่ในช่วง GPA และกลุ่มกิจกรรมที่เลือก")
-        st.caption(f"จากทั้งหมด {total_rows:,} คน")
 
-    with cols[1].container(border=True):
-        value = "—" if kpi["mean_gpa"] is None else f"{kpi['mean_gpa']:.2f}"
-        st.metric("GPA เฉลี่ย", value,
-                  help="ค่าเฉลี่ยของ GPA ของนิสิตที่ผ่านตัวกรอง (สเกล 0-4)")
-        st.caption("สเกล 0.00–4.00")
+def render_kpis(cards: list[KpiCard], persona: str) -> None:
+    """วาด KPI เป็นแถวเดียว (Streamlit จะเรียงซ้อนอัตโนมัติบนจอแคบ)"""
+    if persona == "employer":
+        st.caption("มุมมองนี้เน้นข้อมูลประกาศงานทั้งชุด ตัวกรองนิสิตมีผลกับแท็บ GPA & Extracurricular เท่านั้น")
+    for column, card in zip(st.columns(len(cards)), cards):
+        with column.container(border=True):
+            st.metric(card.label, card.value, help=card.help)
+            st.caption(card.caption)
 
-    with cols[2].container(border=True):
-        value = "—" if kpi["pct_active"] is None else f"{kpi['pct_active']:.1f}%"
-        st.metric("ผู้เข้าร่วมกิจกรรมเสริมหลักสูตร", value,
-                  help="จำนวนนิสิตที่ Extracurricular = 1 หารด้วยนิสิตที่ผ่านตัวกรอง")
-        st.caption(f"{kpi['n_active']:,} จาก {kpi['n']:,} คน")
-
-    with cols[3].container(border=True):
-        st.metric("Perception Gap สูงสุด", f"{widest['gap']:+.1f}",
-                  help="Gap = คะแนนนิสิต − คะแนนตลาดแรงงาน ค่าติดลบ = นิสิตประเมินต่ำกว่าที่ตลาดต้องการ "
-                       "ข้อมูล Benchmark ไม่ถูกกรอง")
-        st.caption(f"{widest['skill']} · นิสิต {widest['student_score']:.1f} "
-                   f"vs ตลาด {widest['industry_score']:.1f} (Benchmark)")
 
 
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-def render_gap_and_demand(jobs: dl.JobBundle, benchmark: pd.DataFrame) -> None:
-    left, right = st.columns(2)
+def render_gap(benchmark: pd.DataFrame) -> None:
+    st.subheader("Perception Gap Analysis")
+    left, right = st.columns([3, 2])
     with left:
-        st.subheader("Perception Gap Analysis")
         st.plotly_chart(charts.perception_gap_chart(benchmark), width="stretch")
-        st.caption(
+    with right:
+        st.markdown(
             "**Gap = คะแนนนิสิต − คะแนนตลาดแรงงาน** เครื่องหมายลบ (−) หมายถึงนิสิตประเมินต่ำกว่าที่ตลาดต้องการ "
             "เครื่องหมายบวก (+) คือสูงกว่า"
         )
@@ -172,50 +248,51 @@ def render_gap_and_demand(jobs: dl.JobBundle, benchmark: pd.DataFrame) -> None:
             "skill": "ทักษะ", "student_score": "นิสิต", "industry_score": "ตลาด", "gap": "Gap"})
         st.dataframe(table, hide_index=True, width="stretch",
                      column_config={"Gap": st.column_config.NumberColumn(format="%+.1f")})
-        
+        st.info(dl.BENCHMARK_NOTE, icon=":material/info:")
 
-    with right:
-        st.subheader("Industry Skill Demand")
-        basis = st.radio(
-            "ฐานคำนวณร้อยละ", options=list(DENOMINATOR_LABELS), format_func=DENOMINATOR_LABELS.get,
-            horizontal=True, key="denominator",
-            help=f"{jobs.n_postings - jobs.n_with_skills:,} จาก {jobs.n_postings:,} ประกาศไม่มีข้อมูลในคอลัมน์ skills จึงให้เลือกฐานคำนวณได้",
-        )
-        denominator = jobs.n_postings if basis == "all" else jobs.n_with_skills
-        hard = dl.with_percentage(jobs.skill_counts.head(TOP_N_SKILLS), denominator)
-        hard["label"] = hard["skill"].map(dl.display_skill_name)
+
+def render_demand(jobs: dl.JobBundle) -> None:
+    st.subheader("Industry Skill Demand")
+    basis = st.radio(
+        "ฐานคำนวณร้อยละของทักษะเทคนิค", options=list(DENOMINATOR_LABELS), format_func=DENOMINATOR_LABELS.get,
+        horizontal=True, key="denominator",
+        help=f"{jobs.n_postings - jobs.n_with_skills:,} จาก {jobs.n_postings:,} ประกาศไม่มีข้อมูลในคอลัมน์ skills จึงให้เลือกฐานคำนวณได้",
+    )
+    denominator = jobs.n_postings if basis == "all" else jobs.n_with_skills
+    hard = dl.with_percentage(jobs.skill_counts.head(TOP_N_SKILLS), denominator)
+    hard["label"] = hard["skill"].map(dl.display_skill_name)
+    soft = dl.with_percentage(jobs.soft_counts, jobs.n_postings).rename(columns={"skill": "label"})
+
+    left, right = st.columns(2)
+    with left:
         st.plotly_chart(
             charts.skill_demand_chart(
-                hard, f"ทักษะเทคนิคที่ระบุในประกาศงาน (ฐาน {denominator:,} ประกาศ)",
+                hard, f"ทักษะเทคนิคในคอลัมน์ skills (ฐาน {denominator:,} ประกาศ)", "ร้อยละของประกาศงาน (%)"),
+            width="stretch",
+        )
+        st.caption(
+            "แหล่งที่มา: `job_market_skills_dataset.csv` คอลัมน์ `skills` · "
+            f"{jobs.n_with_skills:,} จาก {jobs.n_postings:,} ประกาศระบุทักษะ · "
+            "ประกาศหนึ่งอาจระบุหลายทักษะ ร้อยละจึงรวมกันเกิน 100% ได้"
+        )
+    with right:
+        st.plotly_chart(
+            charts.skill_demand_chart(
+                soft, f"Soft Skill ที่พบ keyword ในคำอธิบายงาน (ฐาน {jobs.n_postings:,} ประกาศ)",
                 "ร้อยละของประกาศงาน (%)"),
             width="stretch",
         )
         st.caption(
-            f"แหล่งที่มา: `job_market_skills_dataset.csv` คอลัมน์ `skills` · "
-            f"{jobs.n_with_skills:,} จาก {jobs.n_postings:,} ประกาศระบุทักษะ · "
-            "ประกาศหนึ่งอาจระบุหลายทักษะ ร้อยละจึงรวมกันเกิน 100% ได้ · "
-            "ไม่ได้รับผลจากตัวกรองนิสิต"
+            "ประมาณการจากการค้นคำในคอลัมน์ `description` ด้วยขอบเขตคำ (เช่น team, teamwork, collaborat*) · "
+            f"คำอธิบาย {jobs.pct_description_at_max:.0f}% ถูกตัดที่ {jobs.max_description_chars} ตัวอักษร "
+            "ตัวเลขจึงเป็นค่าต่ำสุดโดยประมาณ ไม่ใช่สัดส่วนความต้องการจริง"
         )
-
-    st.divider()
-    st.subheader("Soft Skill ที่ปรากฏในคำอธิบายงาน (ประมาณการจาก keyword)")
-    soft = dl.with_percentage(jobs.soft_counts, jobs.n_postings).rename(columns={"skill": "label"})
-    st.plotly_chart(
-        charts.skill_demand_chart(
-            soft, f"ร้อยละของประกาศที่คำอธิบายมี keyword (ฐาน {jobs.n_postings:,} ประกาศ)",
-            "ร้อยละของประกาศงาน (%)"),
-        width="stretch",
-    )
-    st.caption(
-        "นับจากการค้นคำในคอลัมน์ `description` ด้วยขอบเขตคำ (เช่น team, teamwork, collaborat*) "
-        f"คำอธิบาย {jobs.pct_description_at_max:.0f}% ถูกตัดที่ {jobs.max_description_chars} ตัวอักษร "
-        "ตัวเลขจึงเป็นค่าต่ำสุดโดยประมาณ ไม่ใช่สัดส่วนความต้องการจริง"
-    )
+    st.caption("ข้อมูลทั้งสองกราฟเป็นข้อมูลระดับตลาดแรงงาน แยกจากข้อมูลนิสิต จึงไม่ได้รับผลจากตัวกรองใน Sidebar")
 
 
 def render_progression() -> None:
     st.subheader("Skill Progression")
-    
+    st.warning(dl.SIMULATED_NOTE, icon=":material/warning:")
     long = dl.get_progression_benchmark()
     all_skills = list(long["skill"].unique())
     selected = st.multiselect("เลือกทักษะที่ต้องการแสดง", options=all_skills, default=all_skills,
@@ -231,7 +308,7 @@ def render_progression() -> None:
         column_config={c: st.column_config.NumberColumn(format="%+.1f") for c in changes.columns
                        if c.startswith("เปลี่ยน")},
     )
-    st.caption("ค่าในตารางเป็นผลต่างของคะแนน")
+    st.caption("ค่าในตารางเป็นผลต่างของคะแนนจำลองระหว่าง Phase ไม่ใช่ผลของกิจกรรมใดโดยเฉพาะ")
 
 
 def render_gpa_activity(filtered: pd.DataFrame) -> None:
@@ -320,8 +397,8 @@ def render_data_quality(students: dl.StudentData, jobs: dl.JobBundle) -> None:
             "- คอลัมน์ `avg_salary` ว่างทั้งหมด จึงไม่วิเคราะห์เงินเดือน\n"
             "- ข้อมูลเน้นตำแหน่งสายข้อมูล/IT และสถานที่ในอินเดีย อาจไม่แทนตลาดแรงงานไทยหรือสาขาอื่น"
         )
-        
-        st.markdown("- Perception Gap และ Skill Progression ")
+        st.markdown("**ข้อมูล Benchmark/จำลอง**")
+        st.markdown("- Perception Gap และ Skill Progression ไม่มีไฟล์ข้อมูลต้นทางในโปรเจกต์")
 
 
 # ---------------------------------------------------------------------------
@@ -340,35 +417,37 @@ def render_insights(
     corr_absence = dl.safe_correlation(filtered, "GPA", "Absences")
 
     st.subheader("ข้อค้นพบจากข้อมูล (Findings)")
-    findings: list[str] = []
+    findings: dict[str, str] = {}
     if diff is not None:
         verdict = ("ช่วงความเชื่อมั่นไม่ครอบคลุม 0" if diff.ci_excludes_zero
                    else "ช่วงความเชื่อมั่นครอบคลุม 0")
-        findings.append(
+        findings["activity"] = (
             f"ในนิสิตที่ผ่านตัวกรอง ({diff.n_with + diff.n_without:,} คน) GPA เฉลี่ยของผู้เข้าร่วมกิจกรรมต่างจากผู้ไม่เข้าร่วม "
             f"**{diff.diff:+.2f}** (95% CI {diff.ci_low:+.2f} ถึง {diff.ci_high:+.2f}, {verdict}) "
             "เป็นความสัมพันธ์เชิงสังเกต ไม่ใช่ผลเชิงสาเหตุ")
     else:
-        findings.append("ตัวกรองปัจจุบันมีนิสิตไม่พอสำหรับเปรียบเทียบกลุ่มเข้าร่วมกับไม่เข้าร่วม")
+        findings["activity"] = "ตัวกรองปัจจุบันมีนิสิตไม่พอสำหรับเปรียบเทียบกลุ่มเข้าร่วมกับไม่เข้าร่วม"
     if corr_absence is not None:
-        findings.append(f"จำนวนวันขาดเรียนมีสหสัมพันธ์กับ GPA ที่ r = **{corr_absence:+.2f}** "
-                        "ในนิสิตที่ผ่านตัวกรอง (ตัวแปรร่วมที่ควรพิจารณาเมื่อตีความผลกิจกรรม)")
+        findings["absence"] = (
+            f"จำนวนวันขาดเรียนมีสหสัมพันธ์กับ GPA ที่ r = **{corr_absence:+.2f}** "
+            "ในนิสิตที่ผ่านตัวกรอง (ตัวแปรร่วมที่ควรพิจารณาเมื่อตีความผลกิจกรรม)")
     if len(top_hard) == 2:
-        a, b = top_hard.iloc[0], top_hard.iloc[1]
-        findings.append(
-            f"ทักษะเทคนิคที่ระบุบ่อยสุดในประกาศงานคือ **{dl.display_skill_name(a['skill'])}** "
-            f"({a['postings'] / jobs.n_postings * 100:.1f}% ของ {jobs.n_postings:,} ประกาศ) และ "
-            f"**{dl.display_skill_name(b['skill'])}** ({b['postings'] / jobs.n_postings * 100:.1f}%)")
+        a_row, b_row = top_hard.iloc[0], top_hard.iloc[1]
+        findings["hard"] = (
+            f"ทักษะเทคนิคที่ระบุบ่อยสุดในประกาศงานคือ **{dl.display_skill_name(a_row['skill'])}** "
+            f"({a_row['postings'] / jobs.n_postings * 100:.1f}% ของ {jobs.n_postings:,} ประกาศ) และ "
+            f"**{dl.display_skill_name(b_row['skill'])}** ({b_row['postings'] / jobs.n_postings * 100:.1f}%)")
     if len(team_row):
-        findings.append(
+        findings["soft"] = (
             f"คำอธิบายงาน **{team_row.iloc[0]['postings'] / jobs.n_postings * 100:.1f}%** มีคำเกี่ยวกับการทำงานเป็นทีม "
             "(ค้นด้วย keyword ในคำอธิบายที่ถูกตัดความยาว จึงเป็นค่าประมาณขั้นต่ำ)")
-    findings.append(
+    findings["gap"] = (
         f"ตามคะแนน Benchmark ช่องว่างใหญ่สุดคือ **{widest['skill']}** (Gap {widest['gap']:+.1f}) "
         "แต่คะแนนชุดนี้ไม่มีไฟล์ข้อมูลต้นทางให้ตรวจสอบ")
     with st.container(border=True):
-        for line in findings:
-            st.markdown(f"- {line}")
+        for key in PERSONA_FINDING_ORDER[persona]:
+            if key in findings:
+                st.markdown(f"- {findings[key]}")
 
     st.subheader(f"ข้อเสนอแนะสำหรับ{PERSONA_LABELS[persona]}")
     st.caption("ข้อเสนอแนะและสมมติฐานต่อไปนี้ไม่ใช่ผลวิเคราะห์โดยตรง ควรทดสอบหรือยืนยันก่อนนำไปใช้")
@@ -410,19 +489,19 @@ def main() -> None:
     benchmark = dl.get_perception_benchmark()
 
     render_header(students, jobs)
-    render_kpis(filtered, len(students.df), benchmark)
+    render_kpis(build_kpi_cards(persona, filtered, len(students.df), benchmark, jobs), persona)
 
-    tab_gap, tab_prog, tab_gpa, tab_quality = st.tabs([
-        "Perception Gap & Industry Demand", "Skill Progression",
-        "GPA & Extracurricular", "คุณภาพข้อมูล"])
-    with tab_gap:
-        render_gap_and_demand(jobs, benchmark)
-    with tab_prog:
-        render_progression()
-    with tab_gpa:
-        render_gpa_activity(filtered)
-    with tab_quality:
-        render_data_quality(students, jobs)
+    renderers = {
+        "gap": lambda: render_gap(benchmark),
+        "demand": lambda: render_demand(jobs),
+        "progression": render_progression,
+        "gpa": lambda: render_gpa_activity(filtered),
+        "quality": lambda: render_data_quality(students, jobs),
+    }
+    order = PERSONA_TAB_ORDER[persona]
+    for key, tab in zip(order, st.tabs([TAB_LABELS[k] for k in order])):
+        with tab:
+            renderers[key]()
 
     render_insights(persona, filtered, jobs, benchmark)
 
