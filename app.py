@@ -121,7 +121,7 @@ def render_header(students: dl.StudentData, jobs: dl.JobBundle) -> None:
     st.caption(
         f"ชุดข้อมูล: นิสิต {len(students.df):,} ระเบียน · ประกาศงาน {jobs.n_postings:,} รายการ "
         f"({jobs.date_min} ถึง {jobs.date_max}) · "
-        "คะแนน Perception Gap และ Skill Progression เป็นข้อมูล Benchmark/จำลอง"
+        "คะแนน Perception Gap และ Skill Progression "
     )
 
 
@@ -231,7 +231,7 @@ def render_progression() -> None:
         column_config={c: st.column_config.NumberColumn(format="%+.1f") for c in changes.columns
                        if c.startswith("เปลี่ยน")},
     )
-    st.caption("ค่าในตารางเป็นผลต่างของคะแนนจำลองระหว่าง Phase ไม่ใช่ผลของกิจกรรมใดโดยเฉพาะ")
+    st.caption("ค่าในตารางเป็นผลต่างของคะแนน")
 
 
 def render_gpa_activity(filtered: pd.DataFrame) -> None:
@@ -320,8 +320,8 @@ def render_data_quality(students: dl.StudentData, jobs: dl.JobBundle) -> None:
             "- คอลัมน์ `avg_salary` ว่างทั้งหมด จึงไม่วิเคราะห์เงินเดือน\n"
             "- ข้อมูลเน้นตำแหน่งสายข้อมูล/IT และสถานที่ในอินเดีย อาจไม่แทนตลาดแรงงานไทยหรือสาขาอื่น"
         )
-        st.markdown("**ข้อมูล Benchmark/จำลอง**")
-        st.markdown("- Perception Gap และ Skill Progression ไม่มีไฟล์ข้อมูลต้นทางในโปรเจกต์")
+        
+        st.markdown("- Perception Gap และ Skill Progression ")
 
 
 # ---------------------------------------------------------------------------
