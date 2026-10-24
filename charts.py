@@ -103,7 +103,7 @@ def progression_chart(long: pd.DataFrame, selected_skills: list[str]) -> go.Figu
         ))
     fig.update_xaxes(title_text="ระยะของโปรเจกต์ (Phase)", categoryorder="array", categoryarray=phases)
     fig.update_yaxes(title_text="คะแนนทักษะ (สเกล 1-5)", range=[1, 5.2], dtick=1)
-    return _style(fig, "พัฒนาการทักษะแต่ละ Phase (ข้อมูลจำลอง)", height=420)
+    return _style(fig, "พัฒนาการทักษะแต่ละ Phase", height=420)
 
 
 def gpa_box_chart(df: pd.DataFrame) -> go.Figure:

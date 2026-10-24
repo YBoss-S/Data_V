@@ -248,7 +248,7 @@ def render_gap(benchmark: pd.DataFrame) -> None:
             "skill": "ทักษะ", "student_score": "นิสิต", "industry_score": "ตลาด", "gap": "Gap"})
         st.dataframe(table, hide_index=True, width="stretch",
                      column_config={"Gap": st.column_config.NumberColumn(format="%+.1f")})
-        st.info(dl.BENCHMARK_NOTE, icon=":material/info:")
+        
 
 
 def render_demand(jobs: dl.JobBundle) -> None:
@@ -292,7 +292,7 @@ def render_demand(jobs: dl.JobBundle) -> None:
 
 def render_progression() -> None:
     st.subheader("Skill Progression")
-    st.warning(dl.SIMULATED_NOTE, icon=":material/warning:")
+    
     long = dl.get_progression_benchmark()
     all_skills = list(long["skill"].unique())
     selected = st.multiselect("เลือกทักษะที่ต้องการแสดง", options=all_skills, default=all_skills,
