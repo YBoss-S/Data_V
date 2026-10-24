@@ -56,7 +56,7 @@ python -m pytest
 ### `data/job_market_skills_dataset.csv` (1,000 แถว)
 คอลัมน์ที่ **ต้องใช้**: `job_title`, `company`, `location`, `category`, `created_date`, `description`, `skills`
 
-### ข้อมูล Benchmark / จำลอง
+### ข้อมูล 
 คะแนน Perception Gap (นิสิต vs ตลาด) และคะแนน Skill Progression 3 Phase **ไม่มีไฟล์ต้นทาง**
 เป็นค่าที่กำหนดไว้ในโค้ดเดิมของโปรเจกต์ (อยู่ใน `data_loader.py` ส่วน Benchmark) แดชบอร์ดติดป้ายกำกับไว้ทุกจุด
 หากมีผลสำรวจจริง ให้แทนที่ฟังก์ชัน `get_perception_benchmark()` และ `get_progression_benchmark()`
