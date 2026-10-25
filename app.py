@@ -133,7 +133,7 @@ def render_sidebar(students: dl.StudentData, jobs: dl.JobBundle) -> tuple[str, t
 # Header + KPI
 # ---------------------------------------------------------------------------
 def render_header(students: dl.StudentData, jobs: dl.JobBundle) -> None:
-    st.title("Unlocking Student Potential")
+    st.title("Student Potential")
     st.markdown(
         "**แดชบอร์ดวิเคราะห์พัฒนาการทักษะของนิสิตเทียบกับความต้องการของตลาดแรงงาน** "
         "ครอบคลุมผลการเรียน (GPA) กิจกรรมเสริมหลักสูตร ช่องว่างการรับรู้ทักษะ (Perception Gap) "
@@ -478,7 +478,7 @@ def render_insights(
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
-    st.set_page_config(page_title="Unlocking Student Potential | Dashboard", page_icon="📊",
+    st.set_page_config(page_title="Student Potential | Dashboard", page_icon="📊",
                        layout="wide", initial_sidebar_state="expanded")
     students, jobs = load_everything()
     persona, gpa_range, activity = render_sidebar(students, jobs)
